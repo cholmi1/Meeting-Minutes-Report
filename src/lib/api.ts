@@ -12,10 +12,11 @@ export async function api<T>(action: string, body?: unknown): Promise<T> {
  catch { throw new ApiError('서버에 연결하지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.',{code:'NETWORK_ERROR',stage:action}) }
  const data=await response.json().catch(()=>null)
  if(!response.ok){
-  const details:SafeDetails={code:safeToken(data?.code),stage:safeToken(data?.stage)||action,provider:PROVIDERS.includes(data?.provider)?data.provider:undefined,upstreamStatus:Number.isInteger(data?.upstreamStatus)&&data.upstreamStatus>=100&&data.upstreamStatus<=599?data.upstreamStatus:undefined}
+  const details:SafeDetails={code:safeToken(data?.code),stage:safeToken(data?.stage)||action,provider:PROVIDERS.includes(data?.provider)?data.provider:undefined,upstreamStatus:Number.isInteger(Number(data?.upstreamStatus))&&Number(data.upstreamStatus)>=100&&Number(data.upstreamStatus)<=599?Number(data.upstreamStatus):undefined}
   const upstream=details.upstreamStatus??response.status
   const message=upstream===401||upstream===403?'인증 또는 사용 권한을 확인해 주세요. 관리자 열쇠와 해당 제공사의 API 열쇠를 확인해 주세요.':upstream===429?'제공사의 사용 한도 또는 요청 제한에 도달했습니다. 계정 한도·결제 상태를 확인한 뒤 다시 시도해 주세요.':upstream===413?'전송 가능한 크기를 초과했습니다. 파일을 나누거나 더 작은 파일을 선택해 주세요.':response.status===400?'입력 자료·모델 선택 또는 업로드 상태를 확인해 주세요. 지원 형식과 설정을 확인한 뒤 다시 시도해 주세요.':'요청을 처리하지 못했습니다. 입력 자료는 유지됩니다. 잠시 후 다시 시도해 주세요.'
-  throw new ApiError(message,details,response.status)
+  const serverMessage=typeof data?.error==='string'&&data.error.length<=600&&!/https?:\/\/|AIza[A-Za-z0-9_-]{15}|sk-[A-Za-z0-9_-]{12}/.test(data.error)?data.error:message
+  throw new ApiError(serverMessage,details,response.status)
  }
  if(!data)throw new ApiError('서버 응답을 읽지 못했습니다. 다시 시도해 주세요.',{code:'INVALID_RESPONSE',stage:action},response.status)
  return data as T

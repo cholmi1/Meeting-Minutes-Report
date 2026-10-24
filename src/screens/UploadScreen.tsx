@@ -80,7 +80,7 @@ const [form, setForm] = useState<UploadForm>({
         }
       }
       setStep(2)
-      const result=await api<{meeting:Meeting}>('analyze',{memo:form.memo,attendees:form.attendees,heldAt:form.heldAt,link:form.link,file,transcript,transcriptionProofs,audioMeta,consent:true})
+      const result=await api<{meeting:Meeting}>('analyze',{memo:form.memo,attendees:form.attendees,heldAt:form.heldAt,link:form.link,file,transcript,transcriptionProofs:audioMeta?transcriptionProofs:undefined,audioMeta,consent:true})
       setStep(3);onAnalyzed(result.meeting)
     } catch(e){setError(errorMessage(e));setPhase('form')}
     finally {prepared?.dispose();busy.current=false}

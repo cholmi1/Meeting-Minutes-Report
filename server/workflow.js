@@ -27,7 +27,7 @@ export async function analyze(body,s,ip) {
   if(body.file && supplied!==null)fail(400,'파일과 이미 전사된 기록을 동시에 분석할 수 없습니다.');
   const audioMeta=body.audioMeta!==undefined?checkedAudioMeta(body.audioMeta):null;
   if(audioMeta && supplied===null)fail(400,'음성 정보와 함께 전사 기록을 제공해 주세요.');
-  const verifiedProcessing=(audioMeta || body.transcriptionProofs!==undefined)?verifyTranscriptionProofs(body.transcriptionProofs,supplied || [],s):undefined;
+  const verifiedProcessing=(audioMeta || (supplied!==null && body.transcriptionProofs!==undefined))?verifyTranscriptionProofs(body.transcriptionProofs,supplied || [],s):undefined;
   const file=body.file?validateReceipt(body.file,s):null;const deadline=Date.now()+275000;
   let fileKey;
   try {
