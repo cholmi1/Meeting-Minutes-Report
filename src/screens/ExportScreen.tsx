@@ -1,3 +1,4 @@
+import {errorMessage} from '../lib/api'
 import type { Meeting } from '../types'
 import { formatDateTime } from '../lib/format'
 import { buildHtmlDocument, downloadFile, safeFileName } from '../lib/exportHtml'
@@ -11,6 +12,9 @@ type Props = {
 
 export default function ExportScreen({ meeting, onBack, onOpenList }: Props) {
   const [toast, setToast] = useState('')
+  const [pending,setPending]=useState(false)
+  const [error,setError]=useState('')
+  async function word(){if(pending)return;setPending(true);setError('');try{const {downloadDocx}=await import('../lib/exportDocx');await downloadDocx(meeting);showToast('Word 다운로드를 요청했습니다. 브라우저 다운로드 목록을 확인하세요.')}catch(e){setError(errorMessage(e))}finally{setPending(false)}}
 
   function showToast(msg: string) {
     setToast(msg)
@@ -20,7 +24,7 @@ export default function ExportScreen({ meeting, onBack, onOpenList }: Props) {
   function downloadHtml() {
     const html = buildHtmlDocument(meeting)
     downloadFile(`${safeFileName(meeting)}.html`, html, 'text/html;charset=utf-8')
-    showToast('HTML 파일을 내려받았습니다.')
+    showToast('HTML 다운로드를 요청했습니다. 브라우저 다운로드 목록을 확인하세요.')
   }
 
   return (
@@ -63,6 +67,7 @@ export default function ExportScreen({ meeting, onBack, onOpenList }: Props) {
                     <th>길이</th>
                     <td>{meeting.durationLabel ?? '-'}</td>
                   </tr>
+                  {meeting.link && <tr><th>참고 링크</th><td colSpan={3}>{meeting.link}</td></tr>}
                 </tbody>
               </table>
             </header>
@@ -112,7 +117,7 @@ export default function ExportScreen({ meeting, onBack, onOpenList }: Props) {
 
             <footer className="paper-foot">
               <span>회의록 보고서 · {meeting.title}</span>
-              <span>확정 {formatDateTime(meeting.createdAt)}</span>
+              <span>생성 {formatDateTime(meeting.createdAt)}</span>
             </footer>
           </article>
         </div>
@@ -125,19 +130,18 @@ export default function ExportScreen({ meeting, onBack, onOpenList }: Props) {
             </button>
             <button
               className="btn btn-line btn-block"
-              onClick={() => showToast('PDF 출력은 다음 단계에서 연결됩니다.')}
+              onClick={() => window.print()}
             >
-              PDF로 내려받기 <span className="badge">2단계</span>
+              PDF 저장 · 인쇄
             </button>
             <button
               className="btn btn-line btn-block"
-              onClick={() => showToast('WORD 출력은 다음 단계에서 연결됩니다.')}
+              onClick={() => void word()} disabled={pending}
             >
-              WORD로 내려받기 <span className="badge">2단계</span>
+              {pending ? 'Word 생성 중…' : 'Word(.docx) 내려받기'}
             </button>
             <p className="panel-note">
-              세 가지 형식 모두 같은 내용으로 만들어집니다. 지금은 HTML만 실제 파일로
-              내려받을 수 있습니다.
+              PDF 버튼은 브라우저·운영체제 인쇄 창을 엽니다. 대상에서 «PDF로 저장»을 선택하세요. HTML과 Word는 파일로 내려받습니다.
             </p>
           </div>
 
@@ -161,7 +165,8 @@ export default function ExportScreen({ meeting, onBack, onOpenList }: Props) {
         </aside>
       </div>
 
-      {toast && <div className="toast">{toast}</div>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {toast && <div role="status" className="toast">{toast}</div>}
     </div>
   )
 }

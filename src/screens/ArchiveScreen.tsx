@@ -37,8 +37,7 @@ export default function ArchiveScreen({ meetings, onOpen, onUpload }: Props) {
       </div>
 
       <p className="note">
-        1단계에서는 화면 확인을 위해 가상 데이터가 들어 있습니다. 새로고침하면 초기 상태로
-        돌아갑니다.
+        확정하고 서버에 저장된 회의록입니다. 검토 중인 초안은 저장되지 않습니다.
       </p>
     </div>
   )

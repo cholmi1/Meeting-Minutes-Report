@@ -4,21 +4,25 @@ import { formatDateTime } from '../lib/format'
 
 type Props = {
   meeting: Meeting
-  onConfirm: (id: string) => void
+  onConfirm: (meeting: Meeting) => Promise<void>
+  onEdit: (meeting: Meeting) => void
+  pending: boolean
+  error: string
   onBack: () => void
   onOpenExport: (id: string) => void
 }
 
-export default function ResultScreen({ meeting, onConfirm, onBack, onOpenExport }: Props) {
+export default function ResultScreen({ meeting, onConfirm, onBack, onOpenExport, onEdit, pending, error }: Props) {
   const [showTranscript, setShowTranscript] = useState(false)
   const confirmed = meeting.status === 'confirmed'
+  const change = (patch: Partial<Meeting>) => onEdit({...meeting,...patch})
 
   return (
     <div className="page">
       <div className="page-head split">
         <div>
           <p className="eyebrow">분석 결과 {confirmed ? '· 확정됨' : '· 검토 중'}</p>
-          <h1 className="h1">{meeting.title}</h1>
+          <h1 className="h1">{meeting.title}</h1>{!confirmed && <label className="field"><span className="field-label">제목 수정</span><input className="input" value={meeting.title} disabled={pending} onChange={e=>change({title:e.target.value})}/></label>}
           <div className="meta-line">
             <span>{formatDateTime(meeting.heldAt)}</span>
             <span className="dot" />
@@ -34,7 +38,7 @@ export default function ResultScreen({ meeting, onConfirm, onBack, onOpenExport 
           </div>
         </div>
         <div className="head-actions">
-          <button className="btn btn-ghost btn-sm" onClick={onBack}>
+          <button className="btn btn-ghost btn-sm" onClick={onBack} disabled={pending}>
             목록으로
           </button>
         </div>
@@ -46,20 +50,20 @@ export default function ResultScreen({ meeting, onConfirm, onBack, onOpenExport 
             <h2 className="card-title">
               <span className="num">1</span> 핵심 요약
             </h2>
-            <p className="summary">{meeting.summary}</p>
+            {confirmed ? <p className="summary">{meeting.summary}</p> : <textarea aria-label="핵심 요약 수정" className="input textarea" rows={6} value={meeting.summary} disabled={pending} onChange={e=>change({summary:e.target.value})}/>}
           </section>
 
           <section className="card">
             <h2 className="card-title">
               <span className="num">2</span> 결정사항
             </h2>
-            <ol className="decisions">
+            {!confirmed&&<button className="link-btn" disabled={pending} onClick={()=>change({decisions:[...meeting.decisions,'']})}>결정사항 추가</button>}<ol className="decisions">
               {meeting.decisions.map((d, i) => (
                 <li key={i}>
                   <span className="mark" aria-hidden="true">
                     {String(i + 1).padStart(2, '0')}
                   </span>
-                  <span>{d}</span>
+                  {confirmed ? <span>{d}</span> : <input aria-label={'결정사항 ' + (i+1)} className="input" value={d} disabled={pending} onChange={e=>change({decisions:meeting.decisions.map((x,n)=>n===i?e.target.value:x)})}/>}
                 </li>
               ))}
             </ol>
@@ -69,13 +73,11 @@ export default function ResultScreen({ meeting, onConfirm, onBack, onOpenExport 
             <h2 className="card-title">
               <span className="num">3</span> 할 일
             </h2>
-            <div className="todo-list">
+            {!confirmed&&<button className="link-btn" disabled={pending} onClick={()=>change({todos:[...meeting.todos,{task:'',owner:'',due:''}]})}>할 일 추가</button>}<div className="todo-list">
               {meeting.todos.map((t, i) => (
                 <div className="todo" key={i}>
                   <span className="todo-box" aria-hidden="true" />
-                  <span className="todo-task">{t.task}</span>
-                  <span className="todo-owner">{t.owner}</span>
-                  <span className="todo-due">{t.due}</span>
+                  {confirmed ? <><span className="todo-task">{t.task}</span><span className="todo-owner">{t.owner}</span><span className="todo-due">{t.due}</span></> : <div className="review-todo">{(['task','owner','due'] as const).map(k=><input key={k} className="input" aria-label={k==='task'?'할 일':k==='owner'?'담당':'기한'} placeholder={k==='task'?'할 일':k==='owner'?'담당':'기한'} value={t[k]} disabled={pending} onChange={e=>change({todos:meeting.todos.map((x,n)=>n===i?{...x,[k]:e.target.value}:x)})}/>)}<button className="link-btn" disabled={pending} onClick={()=>change({todos:meeting.todos.filter((_,n)=>n!==i)})}>삭제</button></div>}
                 </div>
               ))}
             </div>
@@ -96,7 +98,7 @@ export default function ResultScreen({ meeting, onConfirm, onBack, onOpenExport 
                   <li key={i}>
                     <span className="t-time">{line.time}</span>
                     <span className="t-speaker">{line.speaker}</span>
-                    <span className="t-text">{line.text}</span>
+                    {confirmed ? <span className="t-text">{line.text}</span> : <textarea aria-label={'원문 ' + (i+1)} className="input textarea" value={line.text} disabled={pending} onChange={e=>change({transcript:meeting.transcript.map((x,n)=>n===i?{...x,text:e.target.value}:x)})}/>}
                   </li>
                 ))}
               </ul>
@@ -147,13 +149,14 @@ export default function ResultScreen({ meeting, onConfirm, onBack, onOpenExport 
         </aside>
       </div>
 
+      {error && <p role="alert" className="form-error">{error} 초안은 유지됩니다. 아래 버튼으로 다시 시도하세요.</p>}
       <div className="actionbar">
         <div className="actionbar-inner">
           <p className="actionbar-text">
             {confirmed ? '확정된 회의록입니다.' : '확정하면 WORD·PDF·HTML로 내려받을 수 있습니다.'}
           </p>
           <div className="actionbar-btns">
-            <button className="btn btn-ghost" onClick={onBack}>
+            <button className="btn btn-ghost" onClick={onBack} disabled={pending}>
               취소
             </button>
             {confirmed ? (
@@ -161,8 +164,8 @@ export default function ResultScreen({ meeting, onConfirm, onBack, onOpenExport 
                 출력 화면 열기
               </button>
             ) : (
-              <button className="btn btn-primary" onClick={() => onConfirm(meeting.id)}>
-                확정하고 출력
+              <button className="btn btn-primary" disabled={pending || !meeting.title.trim()} onClick={() => void onConfirm(meeting)}>
+                {pending ? '서버에 저장 중…' : '확정하고 출력'}
               </button>
             )}
           </div>

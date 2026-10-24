@@ -1,11 +1,12 @@
 type Props = {
+  disabled?: boolean
   onHome: () => void
   onArchive: () => void
   onAdmin: () => void
   onLock: () => void
 }
 
-export default function TopBar({ onHome, onArchive, onAdmin, onLock }: Props) {
+export default function TopBar({ onHome, onArchive, onAdmin, onLock, disabled }: Props) {
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -27,7 +28,7 @@ export default function TopBar({ onHome, onArchive, onAdmin, onLock }: Props) {
           <button className="btn btn-ghost btn-sm" onClick={onAdmin}>
             관리자
           </button>
-          <button className="btn btn-line btn-sm" onClick={onLock}>
+          <button className="btn btn-line btn-sm" onClick={onLock} disabled={disabled}>
             잠그기
           </button>
         </div>

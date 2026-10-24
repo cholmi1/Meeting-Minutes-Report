@@ -60,7 +60,7 @@ export default function HomeScreen({ meetings, onUpload, onOpen, onArchive }: Pr
               <em>건</em>
             </span>
           </div>
-          <p className="side-note">무료 범위 안에서 운영하며, 이름·연락처는 저장하지 않습니다.</p>
+          <p className="side-note">확정한 회의록만 저장됩니다. 개인정보·기밀정보 입력 전 처리 조건을 확인하세요.</p>
         </aside>
       </section>
 

@@ -59,6 +59,7 @@ export function buildHtmlDocument(m: Meeting): string {
       <tr><th>참석</th><td>${esc(m.attendees.join(', '))}</td></tr>
       <tr><th>자료</th><td>${esc(m.fileName ?? '없음')}</td></tr>
       <tr><th>길이</th><td>${esc(m.durationLabel ?? '-')}</td></tr>
+      ${m.link ? `<tr><th>참고 링크</th><td>${esc(m.link)}</td></tr>` : ''}
     </table>
 
     <h2>1. 핵심 요약</h2>
@@ -77,7 +78,7 @@ ${todos}
 
     <footer>
       <span>회의록 보고서</span>
-      <span>확정 ${esc(formatDateTime(m.createdAt))}</span>
+      <span>생성 ${esc(formatDateTime(m.createdAt))}</span>
     </footer>
   </body>
 </html>`
@@ -92,5 +93,5 @@ export function downloadFile(name: string, content: string, type: string) {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => URL.revokeObjectURL(url), 10000)
 }

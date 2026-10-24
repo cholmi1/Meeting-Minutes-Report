@@ -1642,3 +1642,6 @@ button {
     font-size: 19px;
   }
 }
+
+button:disabled{opacity:.55;cursor:not-allowed}.consent{display:block;font-size:13px;line-height:1.7;margin:18px 0}.consent input{margin-right:8px}.review-todo{display:grid;gap:8px;width:100%}.review-todo input{min-width:0}.input.textarea{width:100%}.form-error{white-space:pre-wrap}
+@media print{ @page{size:A4;margin:16mm} body{background:white!important} body *{visibility:hidden!important} .paper,.paper *{visibility:visible!important} .topbar,.page-head,.export-side,.toast,.actionbar{display:none!important}.main,.page,.export-grid,.paper-wrap{display:block!important;margin:0!important;padding:0!important;width:auto!important;max-width:none!important}.paper{position:static!important;margin:0!important;padding:0!important;width:100%!important;max-width:none!important;box-shadow:none!important;border:0!important}.paper-table tr,.paper-meta tr{break-inside:avoid}.paper-section p{white-space:pre-wrap}.paper-section{break-inside:auto}.paper-section h3{break-after:avoid} }

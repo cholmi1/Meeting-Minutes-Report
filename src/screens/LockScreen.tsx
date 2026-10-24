@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { DEMO_ACCESS_KEY } from '../lib/config'
+import { api, errorMessage } from '../lib/api'
 
 type Props = {
   onUnlock: () => void
@@ -9,14 +9,14 @@ export default function LockScreen({ onUnlock }: Props) {
   const [key, setKey] = useState('')
   const [error, setError] = useState('')
 
-  function submit(e: React.FormEvent) {
+  const [pending, setPending] = useState(false)
+  async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (key.trim() === DEMO_ACCESS_KEY) {
-      setError('')
-      onUnlock()
-    } else {
-      setError('열쇠가 맞지 않습니다. 관리자에게 받은 단어를 확인해 주세요.')
-    }
+    if (pending) return
+    setPending(true);setError('')
+    try { await api('login', {key});setKey('');onUnlock() }
+    catch(e) { setError(errorMessage(e)) }
+    finally { setPending(false) }
   }
 
   return (
@@ -46,9 +46,9 @@ export default function LockScreen({ onUnlock }: Props) {
               setError('')
             }}
           />
-          {error && <p className="form-error">{error}</p>}
-          <button className="btn btn-primary btn-block" type="submit">
-            들어가기
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <button className="btn btn-primary btn-block" type="submit" disabled={pending || !key.trim()}>
+            {pending ? '확인 중…' : '들어가기'}
           </button>
         </form>
 
@@ -58,7 +58,7 @@ export default function LockScreen({ onUnlock }: Props) {
         </p>
       </div>
 
-      <p className="lock-foot">회의 내용은 저장되며, 이름·연락처는 받지 않습니다.</p>
+      <p className="lock-foot">참석자와 회의 내용에 개인정보가 포함될 수 있습니다. 민감정보는 입력하지 마세요.</p>
     </div>
   )
 }
