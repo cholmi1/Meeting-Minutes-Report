@@ -7,7 +7,7 @@ import ResultScreen from './screens/ResultScreen'
 import ExportScreen from './screens/ExportScreen'
 import ArchiveScreen from './screens/ArchiveScreen'
 import AdminScreen from './screens/AdminScreen'
-import { DEFAULT_API_SETTINGS, type ApiSettings } from './lib/providers'
+import { DEFAULT_API_SETTINGS, normalizeSettings, type ApiSettings } from './lib/providers'
 import { api, errorMessage, type Session } from './lib/api'
 import type { Meeting } from './types'
 import type { View } from './lib/config'
@@ -19,7 +19,7 @@ export default function App() {
  const [currentId,setCurrentId]=useState(''),[settings,setSettings]=useState<ApiSettings>(DEFAULT_API_SETTINGS)
  const [saving,setSaving]=useState(false),[saveError,setSaveError]=useState(''),[loggingOut,setLoggingOut]=useState(false)
  const savingRef=useRef(false)
- const load=useCallback(async()=>{setLoading(true);setError('');try{const s=await api<Session>('session');setSession(s);if(s.authenticated){const [a,m]=await Promise.all([api<ApiSettings>('settings'),api<{meetings:Meeting[]}>('meetings')]);setSettings(a);setMeetings(m.meetings)}}catch(e){setError(errorMessage(e))}finally{setLoading(false)}},[])
+ const load=useCallback(async()=>{setLoading(true);setError('');try{const s=await api<Session>('session');setSession(s);if(s.authenticated){const [a,m]=await Promise.all([api<ApiSettings>('settings'),api<{meetings:Meeting[]}>('meetings')]);setSettings(normalizeSettings(a));setMeetings(m.meetings)}}catch(e){setError(errorMessage(e))}finally{setLoading(false)}},[])
  useEffect(()=>{void load()},[load])
  const go=useCallback((next:View,id?:string)=>{if(id)setCurrentId(id);setView(next);window.scrollTo({top:0})},[])
  async function confirm(meeting:Meeting){if(savingRef.current)return;savingRef.current=true;setSaving(true);setSaveError('');try{const {meeting:saved}=await api<{meeting:Meeting}>('meetings',{meeting:{...meeting,status:'confirmed'}});if(saved.status!=='confirmed')throw new Error('서버에서 확정 저장을 확인하지 못했습니다. 다시 시도해 주세요.');setMeetings(p=>[saved,...p.filter(m=>m.id!==saved.id)]);setDraft(null);go('export',saved.id)}catch(e){setSaveError(errorMessage(e))}finally{setSaving(false);savingRef.current=false}}
@@ -34,6 +34,6 @@ export default function App() {
  {view==='result'&&current&&<ResultScreen key={current.id} meeting={current} onConfirm={confirm} onEdit={setDraft} pending={saving} error={saveError} onBack={()=>go('archive')} onOpenExport={id=>go('export',id)}/>}
  {view==='export'&&current?.status==='confirmed'&&<ExportScreen meeting={current} onBack={()=>go('result',current.id)} onOpenList={()=>go('archive')}/>}
  {view==='archive'&&<><ArchiveScreen meetings={meetings} onOpen={id=>go('result',id)} onUpload={()=>go('upload')}/>{draft&&<div className="page panel"><p>아직 저장되지 않은 초안</p><button className="btn btn-line" onClick={()=>go('result',draft.id)}>초안 검토로 돌아가기</button></div>}</>}
- {view==='admin'&&<AdminScreen settings={settings} admin={session.admin} onAdmin={()=>setSession(s=>s?{...s,admin:true}:s)} onChange={setSettings} onBack={()=>go('home')}/>}
+ {view==='admin'&&<AdminScreen settings={settings} admin={session.admin} onAdmin={()=>setSession(s=>s?{...s,admin:true}:s)} onChange={next=>setSettings(normalizeSettings(next))} onBack={()=>go('home')}/>}
  </main></div>
 }

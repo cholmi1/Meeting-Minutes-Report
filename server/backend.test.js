@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import handler from '../api/app.js';
 import { seal, unseal, encrypt, decrypt, equal, setSession, session, checkOrigin, AppError } from './security.js';
 import { input, meeting, uploadInfo, freshId, CHUNK_SIZE } from './validation.js';
-import { analyze, uploadChunk } from './gemini.js';
+import { uploadChunk, uploadGranularity, checkedUploadURL, checkedUploadedMetadata, validateReceipt } from './gemini.js';
+import { analyze } from './workflow.js';
 process.env.SESSION_SECRET='test-only-session-secret-with-more-than-32-characters';
 process.env.ACCESS_KEY='test-only-access-key'; process.env.ADMIN_KEY='test-only-admin-key';
 process.env.FIREBASE_SERVICE_ACCOUNT_JSON='{}';
@@ -54,15 +55,15 @@ test('handler session/authentication and mutation errors without DB calls',async
   const admin=req('login','POST',{key:'no',admin:true}); r=response(); await handler(admin,r); assert.equal(r.statusCode,401);
   const cross=req('logout','POST',{}); cross.headers.origin='https://evil.com'; r=response(); await handler(cross,r); assert.equal(r.statusCode,403);
   const settings=req('settings','POST',{}); settings.headers.cookie=cookie(); r=response(); await handler(settings,r); assert.equal(r.statusCode,403);
-  const unsupported=req('settings','POST',{provider:'openai',key:'test-only-openai-key'}); unsupported.headers.cookie=cookie('admin'); r=response(); await handler(unsupported,r); assert.equal(r.statusCode,400);
+  const unsupported=req('provider-models','POST',{provider:'unsupported',purpose:'summarize'}); unsupported.headers.cookie=cookie('admin'); r=response(); await handler(unsupported,r); assert.equal(r.statusCode,400);
   const bad=req('login','POST','not json'); r=response(); await handler(bad,r); assert.equal(r.statusCode,400);
   const large=req('login','POST',{}); large.headers['content-length']='4000000'; r=response(); await handler(large,r); assert.equal(r.statusCode,413);
   r=response(); await handler(req('logout','POST',{}),r); assert.equal(r.body.authenticated,false); assert(r.headers['Set-Cookie'].includes('Max-Age=0'));
 });
 test('analysis refuses unsigned external file receipts before any network calls',async()=>{
-  await assert.rejects(analyze({memo:'회의',heldAt:'2026-10-24',file:{uri:'https://attacker.example/audio',receipt:'invalid'}},{sid:'test'},'ip'),AppError);
+  await assert.rejects(analyze({consent:true,memo:'회의',heldAt:'2026-10-24',file:{uri:'https://attacker.example/audio',receipt:'invalid'}},{sid:'test'},'ip'),AppError);
 });
-test('upload token bound to session, offset, base64 and 2MB before DB',async()=>{
+test('old upload clients fail safely; token and session remain bound',async()=>{
   const s={sid:'session-test'}, base={name:'x.mp3',mimeType:'audio/mpeg',size:CHUNK_SIZE+1,uploadURL:'https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=test',sid:s.sid,nonce:'a'.repeat(32),expires:Date.now()+60000};
   const token=seal(base,'upload');
   await assert.rejects(uploadChunk({uploadToken:token,offset:1,data:'YQ==',final:false},s),AppError);
@@ -78,4 +79,13 @@ test('missing, short, or identical authentication keys fail readiness without re
     process.env.ADMIN_KEY='short'; let r=response(); await handler(req('session'),r); assert.equal(r.body.configured,false);
     process.env.ADMIN_KEY=process.env.ACCESS_KEY; r=response(); await handler(req('session'),r); assert.equal(r.body.configured,false);
   } finally { process.env.ADMIN_KEY=original; }
+});
+
+test('direct Google upload negotiates granularity and never returns an API-key URL',()=>{
+ assert.equal(uploadGranularity('8388608'),8388608);assert.equal(uploadGranularity(null),8388608);for(const v of ['0','2097153','999999999'])assert.throws(()=>uploadGranularity(v),AppError);
+ assert.doesNotThrow(()=>checkedUploadURL('https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=scoped-capability'));
+ for(const url of ['https://evil.example/upload/x','http://generativelanguage.googleapis.com/upload/x','https://generativelanguage.googleapis.com/v1beta/files','https://generativelanguage.googleapis.com/upload/x?key=secret','https://generativelanguage.googleapis.com/upload/x?access_token=secret'])assert.throws(()=>checkedUploadURL(url),AppError);
+ const u={nonce:'n'.repeat(32),size:1234,mimeType:'audio/mpeg',name:'original.mp3'},meta={name:'files/abc',uri:'https://generativelanguage.googleapis.com/v1beta/files/abc',displayName:'mm-'+u.nonce,sizeBytes:'1234',mimeType:'audio/mpeg'};
+ const verified=checkedUploadedMetadata(meta,u);assert.equal(verified.name,'original.mp3');assert.equal(verified.nonce,u.nonce);for(const change of [{displayName:'other'},{sizeBytes:'1235'},{mimeType:'text/plain'},{uri:'https://evil.example/f'}])assert.throws(()=>checkedUploadedMetadata({...meta,...change},u),AppError);
+ const s={sid:'test'},f={...verified,sid:s.sid,expires:Date.now()+10000},file={...verified,receipt:seal(f,'file-receipt')};assert.equal(validateReceipt(file,s).nonce,u.nonce);assert.throws(()=>validateReceipt({...file,nonce:'other'},s),AppError);assert.throws(()=>validateReceipt(file,{sid:'other'}),AppError);
 });

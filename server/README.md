@@ -1,36 +1,30 @@
-# Meeting minutes server
+# Meeting minutes server · four-provider revision
 
-Node ESM, Firebase Admin SDK only. All routes use `/api/app?action=ACTION`. Response errors are `{ "error": "Korean safe message" }`. Responses are never cached. There is no CORS exception.
+Node.js 24 ESM / Vercel / Firebase Admin. All API actions use `/api/app?action=...`; mutations require same-origin JSON and authenticated secure cookie. Required environment variables and Firebase deny rules remain unchanged. No new provider key is placed in source or browser storage.
 
-## Deployment
+## Provider settings
+`GET settings` returns only key registration booleans/last4, `transcribe` (gemini/openai), `summarize` (gemini/openai/claude/deepseek), `transcribeModel`, `summarizeModel`. Empty model selects a recommended model from that same provider's live model list. No cross-provider failure fallback.
 
-Required server-only variables: `FIREBASE_SERVICE_ACCOUNT_JSON` (JSON service account with Firestore permissions), `ACCESS_KEY`, `ADMIN_KEY`, and `SESSION_SECRET` (at least 32 characters, generate with a cryptographic RNG). Use separate access/admin keys, each at least 12 characters. Never prefix any of these with VITE_. No Gemini environment variable is necessary: an administrator registers it in the app. Firebase client rules must deny all direct reads/writes. Configure Vercel `api/app.js` maxDuration 300 seconds in vercel.json as well; the module exports maxDuration/config. Plan limits must support this duration. Firebase project must have Firestore Native database provisioned.
+Admin `POST settings`: `{provider,key}`, `{provider,remove:true}`, or selected engines/model IDs. A single key update preserves other keys and engine choices. Keys use AES-256-GCM encryption derived from SESSION_SECRET. Rotating SESSION_SECRET invalidates sessions and stored provider keys.
 
-Firestore collections: `meetings` (confirmed only), `_mmSettings` (encrypted keys), `_mmRateLimits` (HMAC IDs and counts), `_mmUploads` (progress only). Optionally enable Firestore TTL on `expiresAt` for the latter two internal collections. No raw IP, audio, upload URL, transcript draft, or plaintext API key is stored. Meeting records are shared across authenticated users of this single app. Scope to organization/user if separate tenants are introduced.
+Admin `POST provider-models {provider,purpose}` returns `{provider,purpose,models:[{id,name}],recommended}`. `provider-test` returns safe connection metadata. These list models only, not inference. Key save validates syntax, not actual account access or billing.
 
-SESSION_SECRET rotation logs users out and makes existing encrypted provider credentials unreadable; register AI keys again after rotation. Cookies always use Secure, so integration testing requires HTTPS. Origin is required and must match the request Host on every mutation; command-line tests must explicitly set Origin.
+## Gemini direct upload
+The former 2MiB Vercel proxy chunks were rejected: live synthetic test showed required granularity 8388608 bytes; 2097152 returned400, 8388608 followed by final remainder returned200. Corrected transport avoids Vercel's request body limit:
 
-## Contract
+1. `POST upload-start {name,size,mimeType}` validates max100MiB, starts one bounded Google resumable upload, returns `{transport:'direct',uploadUrl,uploadToken,chunkSize}`. The URL is an ephemeral upload-only capability, not an API key. Never log or persist it in the browser. The server rejects URLs containing API keys or unexpected hosts/paths.
+2. Browser posts Blob chunks directly to the exact Google host with advertised granularity and upload-offset/command headers. CSP permits only that additional connect origin. No API key is sent by the browser. No blind retries after uncertain chunk acceptance.
+3. `POST upload-complete {uploadToken,fileName}` retrieves metadata with the server key and checks session, nonce displayName, size, MIME and file identity. Returns `{file}` containing a signed encrypted receipt. Pass the whole object to analyze.
+4. `POST upload-cancel {uploadToken}` cancels partial uploads; `{file}` deletes a verified completed file. Analysis finally attempts file deletion. Failed/abandoned provider objects may follow provider retention rules; no raw audio is stored in Firestore.
 
-- GET session: `{authenticated,admin,configured}`; no login needed.
-- POST login `{key,admin?:boolean}`: same session shape. Admin elevation requires an existing authenticated user. 8 attempts per IP/role per 15 minute window, transaction enforced.
-- POST logout `{}` clears cookie.
-- GET settings: `{keys:{gemini,openai,claude,deepseek},transcribe:'gemini',summarize:'gemini'}`. Each key contains only `{registered,tail}`.
-- POST settings (admin): `{provider,key}` OR `{provider,remove:true}` OR `{transcribe:'gemini',summarize:'gemini'}`. Only provider:'gemini' is accepted for registration/removal; other providers and selector values are rejected.
-- GET meetings: `{meetings:[...]}`, most recent 200 by authoritative server createdAt.
-- POST meetings `{meeting}`: validates the full src/types.ts shape, confirmed status only, UUID v4, byte-size cap with metadata headroom. Returns `{meeting}` with server-authoritative createdAt. Existing confirmed records can be updated. Firestore `_savedAt` is a server timestamp and omitted from API.
-- DELETE meetings `{id}` returns `{ok:true}`.
-- POST analyze `{memo,attendees,heldAt,link,file?,consent?}`. attendees may be a string (comma/newline separated) or string[]. Link is validated but never fetched. At least a memo or verified file is required. consent is a UI acknowledgement and is not stored. Returns `{meeting}` with draft status. Never saves drafts. Six attempts per rolling fixed hourly window for BOTH session and HMAC IP. API failures count as attempts.
-- POST upload-start `{name,size,mimeType}` => `{uploadToken,chunkSize:2097152}`. Maximum 100MiB; accepted audio/video MIME whitelist. Twenty upload starts per session/IP hourly window.
-- POST upload-chunk `{uploadToken,offset,data,final}`: canonical base64 only, offset multiple of 2MiB; each nonfinal chunk exactly 2MiB, final must end at declared size. Nonfinal returns `{ok:true,offset}`. Final returns `{file:{uri,mimeType,name,size,deleteName,receipt}}`. Pass this ENTIRE object to analyze. Tokens are encrypted AND HMAC-signed; no upload URL or API key is exposed. Chunks are transactionally serialized; a failed/uncertain chunk requires restarting the upload.
-- POST upload-cancel `{file}` deletes a completed Gemini file with a valid receipt. There is no resumable-partial cancel UI/API. Completed abandoned files and failed deletions rely on Gemini Files automatic expiration; backend immediately attempts deletion in analysis finally, including analysis errors/limits. No uploaded audio is retained in Firestore.
+`upload-chunk` exists only to return a safe409 to stale 2MiB clients. `upload-diagnostic {consent:true}` is admin-only, uploads/deletes a synthetic9MiB WAV using provider chunk granularity and never invokes a model. Rate limited3/15min.
 
-Gemini model is discovered from live listModels, preferring stable gemini-2.5-flash, then another stable versioned Flash (no preview/latest alias). Audio/video processing is polled for up to approximately 150 seconds; overall analysis deadline leaves room below 300 seconds. Memo-only analysis forces an empty transcript. Missing facts/owners/dates are explicitly unknown and no remote links are retrieved. User must review generated content before confirm/save.
+## Analysis and OpenAI transcription
+`POST analyze {consent:true,memo,attendees,heldAt,link,file?,transcript?,transcriptionProofs?,audioMeta?}` returns a draft meeting. Memo-only uses the selected summarizer only. Gemini audio is transcribed first, then passed to the chosen summarizer. Drafts never auto-save; only validated confirmed meetings persist. Actual engine/model processing metadata is included in result/export. No remote link fetching.
 
-## Verification
+OpenAI browser preparation: decode locally, downsample16kHz mono PCM16 WAV, split60seconds. Max source100MiB/60min with a conservative256MiB memory guard; browser internals cannot be hard-capped. `POST transcribe-chunk {consent:true,data,chunkIndex,offsetSeconds}` validates bounded WAV and uses only saved OpenAI model/key. Returns transcript, processing, signed proof. Browser preserves every proof including silence. analyze verifies session, order, exact transcript hashes, count, expiry and single actual model before accepting audioMeta and recording transcriber identity. At most120chunks/7200audioseconds per hour per session/IP. Summary attempts6/hour; uploads20/hour.
 
-`node --test server/backend.test.js` runs nine local suites (no network/secrets): encryption/tampering/expiry, cookie security, same-origin checks, complete meeting schema and UTF-8 size, upload bounds, handler auth and malformed JSON, unsigned URI rejection, upload token/session/base64/offset guards, disabled provider rejection, and readiness enforcement for short/identical authentication keys.
+Errors return only safe `{error,code?,stage?,provider?,upstreamStatus?}`. Never return/log raw upstream bodies, keys, temporary capability URLs or meeting data. Existing8h HttpOnly Secure SameSiteStrict authentication, key length/distinctness and Origin checks remain.
 
-`node node_modules/oxlint/bin/oxlint api server` checks server sources.
-
-Live follow-up: verify Firebase connection and deny rules; HTTPS normal login then admin elevation; register a Gemini key; confirm only last four characters return; memo-only analysis and confirmed save/reload/delete; small MP3 upload with >2MiB multiple chunks and server deletion; >100MiB/forged receipts rejected; six successful/failed analyses then seventh 429; origin mismatch and unsigned session cookie rejected; settings inaccessible without admin; key removal blocks analysis. Real Gemini generation and Firestore transactions require deployment credentials and were not exercised by the offline tests.
+## Verify
+`node --test server/*.test.js` covers old security regression, four providers/settings, model discovery, request adapters/errors, proof/WAV validation, direct upload metadata/nonce rules and frontend-to-server PCM compatibility. Typecheck/build additionally required. Real provider inference requires explicit user consent and may cost money; mocks do not prove actual provider availability. Validate actual browser CORS with a synthetic file before retrying user material.

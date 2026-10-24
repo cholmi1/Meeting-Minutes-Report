@@ -1,3 +1,4 @@
+import {processingLabel} from './processing'
 import type { Meeting } from '../types'
 import { formatDateTime } from '../lib/format'
 
@@ -58,6 +59,7 @@ export function buildHtmlDocument(m: Meeting): string {
       <tr><th>일시</th><td>${esc(formatDateTime(m.heldAt))}</td></tr>
       <tr><th>참석</th><td>${esc(m.attendees.join(', '))}</td></tr>
       <tr><th>자료</th><td>${esc(m.fileName ?? '없음')}</td></tr>
+      <tr><th>처리 AI</th><td>${esc(processingLabel(m))}</td></tr>
       <tr><th>길이</th><td>${esc(m.durationLabel ?? '-')}</td></tr>
       ${m.link ? `<tr><th>참고 링크</th><td>${esc(m.link)}</td></tr>` : ''}
     </table>

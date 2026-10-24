@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import ts from 'typescript';
+import { parseWavChunk } from './workflow.js';
+const source=fs.readFileSync(new URL('../src/lib/audioChunks.ts',import.meta.url),'utf8');
+const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
+const audio=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+test('client WAV bytes satisfy strict server 60-second PCM contract',()=>{const samples=new Float32Array(16000*60);for(let i=0;i<samples.length;i++)samples[i]=Math.sin(i/20)*0.1;const wav=audio.encodeWav(samples);assert.equal(wav.length,1920044);const parsed=parseWavChunk({consent:true,data:Buffer.from(wav).toString('base64'),chunkIndex:0,offsetSeconds:0});assert.equal(parsed.seconds,60);assert.equal(parsed.offsetSeconds,0);assert.throws(()=>audio.encodeWav(new Float32Array(960001)));});
+test('mono resampling keeps duration, bounds, average and final partial chunk',()=>{const a=new Float32Array(48000).fill(0.5),b=new Float32Array(48000).fill(-0.25);const mono=audio.resampleMono([a,b],48000,0,1);assert.equal(mono.length,16000);assert(Math.abs(mono[0]-0.125)<0.00001);assert.equal(audio.resampleMono([a],48000,0.5,1).length,8000);assert.equal(audio.resampleMono([a],48000,2,1).length,0);assert.throws(()=>audio.resampleMono([],48000));assert.throws(()=>audio.resampleMono([a],-1));const wav=audio.encodeWav(new Float32Array([-2,2,NaN]));const v=new DataView(wav.buffer);assert.equal(v.getInt16(44,true),-32768);assert.equal(v.getInt16(46,true),32767);assert.equal(v.getInt16(48,true),0);});

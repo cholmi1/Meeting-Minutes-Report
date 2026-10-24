@@ -1,3 +1,4 @@
+import {processingLabel} from '../lib/processing'
 import {errorMessage} from '../lib/api'
 import type { Meeting } from '../types'
 import { formatDateTime } from '../lib/format'
@@ -67,6 +68,7 @@ export default function ExportScreen({ meeting, onBack, onOpenList }: Props) {
                     <th>길이</th>
                     <td>{meeting.durationLabel ?? '-'}</td>
                   </tr>
+                  <tr><th>처리 AI</th><td colSpan={3}>{processingLabel(meeting)}</td></tr>
                   {meeting.link && <tr><th>참고 링크</th><td colSpan={3}>{meeting.link}</td></tr>}
                 </tbody>
               </table>
@@ -146,7 +148,7 @@ export default function ExportScreen({ meeting, onBack, onOpenList }: Props) {
           </div>
 
           <div className="panel">
-            <p className="panel-title">확정 정보</p>
+            <p className="panel-title">확정 정보</p><p className="panel-note">실제 처리: {processingLabel(meeting)}</p>
             <dl className="kv">
               <dt>상태</dt>
               <dd>확정됨</dd>

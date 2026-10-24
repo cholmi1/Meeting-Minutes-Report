@@ -1,6 +1,8 @@
 import { AppError, fail, ready, needConfig, session, requireSession, setSession, clearSession, checkOrigin, equal, ipId, object, text } from '../server/security.js';
 import { settings, updateSettings, listMeetings, saveMeeting, deleteMeeting, rateLimit } from '../server/store.js';
-import { uploadStart, uploadChunk, uploadCancel, uploadDiagnostic, analyze } from '../server/gemini.js';
+import { uploadStart, uploadChunk, uploadCancel, uploadDiagnostic, uploadComplete } from '../server/gemini.js';
+import { analyze, transcribeOpenAIChunk } from '../server/workflow.js';
+import { providerModels, providerTest } from '../server/providers.js';
 
 export const maxDuration = 300;
 export const config = { maxDuration: 300 };
@@ -26,6 +28,7 @@ async function readBody(req) {
 function send(res,status,body) { res.statusCode=status; res.setHeader('Content-Type','application/json; charset=utf-8'); res.end(JSON.stringify(body)); }
 export default async function handler(req,res) {
   res.setHeader('Cache-Control','no-store, max-age=0');
+  res.setHeader('X-App-Version','2026-10-24-multi-v2');
   res.setHeader('Pragma','no-cache');
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Referrer-Policy','no-referrer');
@@ -37,7 +40,7 @@ export default async function handler(req,res) {
     if(method!=='GET') checkOrigin(req);
     if(action==='session' && method==='GET') {
       const s=session(req);
-      return send(res,200,{authenticated:Boolean(s),admin:s?.role==='admin',configured:ready()});
+      return send(res,200,{authenticated:Boolean(s),admin:s?.role==='admin',configured:ready(),version:'2026-10-24-multi-v2'});
     }
     needConfig();
     if(action==='login' && method==='POST') {
@@ -60,6 +63,10 @@ export default async function handler(req,res) {
     else if(action==='meetings' && method==='POST') result=await saveMeeting(await readBody(req));
     else if(action==='meetings' && method==='DELETE') result=await deleteMeeting(await readBody(req));
     else if(action==='upload-diagnostic' && method==='POST') { requireSession(req,true); result=await uploadDiagnostic(await readBody(req),s,ipId(req)); }
+    else if(action==='provider-models' && method==='POST') { requireSession(req,true); result=await providerModels(await readBody(req)); }
+    else if(action==='provider-test' && method==='POST') { requireSession(req,true); result=await providerTest(await readBody(req)); }
+    else if(action==='transcribe-chunk' && method==='POST') result=await transcribeOpenAIChunk(await readBody(req),s,ipId(req));
+    else if(action==='upload-complete' && method==='POST') result=await uploadComplete(await readBody(req),s);
     else if(action==='analyze' && method==='POST') result=await analyze(await readBody(req),s,ipId(req));
     else if(action==='upload-start' && method==='POST') result=await uploadStart(await readBody(req),s,ipId(req));
     else if(action==='upload-chunk' && method==='POST') result=await uploadChunk(await readBody(req),s);
@@ -70,6 +77,7 @@ export default async function handler(req,res) {
     // Do not log user input, credentials, provider errors, or upload URLs.
     const known=e instanceof AppError;
     if(known && e.status===429) res.setHeader('Retry-After','60');
-    return send(res,known?e.status:500,{error:known?e.message:'서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요. 반복되면 관리자가 Firebase와 서버 환경변수를 확인해 주세요.'});
+    const detail={}; if(known) for(const k of ['code','stage','provider','upstreamStatus']) if(typeof e[k]==='string' && /^[a-zA-Z0-9_-]{0,50}$/.test(e[k])) detail[k]=e[k];
+    return send(res,known?e.status:500,{...detail,error:known?e.message:'서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요. 반복되면 관리자가 Firebase와 서버 환경변수를 확인해 주세요.'});
   }
 }

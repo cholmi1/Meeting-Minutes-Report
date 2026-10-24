@@ -1,3 +1,4 @@
+import {processingLabel} from '../lib/processing'
 import { useState } from 'react'
 import type { Meeting } from '../types'
 import { formatDateTime } from '../lib/format'
@@ -112,7 +113,7 @@ export default function ResultScreen({ meeting, onConfirm, onBack, onOpenExport,
 
         <aside className="result-side">
           <div className="panel">
-            <p className="panel-title">회의 정보</p>
+            <p className="panel-title">회의 정보</p><p className="panel-note">실제 처리: {processingLabel(meeting)}</p>
             <dl className="kv">
               <dt>일시</dt>
               <dd>{formatDateTime(meeting.heldAt)}</dd>

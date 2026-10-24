@@ -1,4 +1,6 @@
+import {uploadGemini} from '../lib/geminiUpload'
 import { useRef, useState } from 'react'
+import { blobBase64, prepareAudio, type PreparedAudio } from '../lib/audioChunks'
 import type { Meeting, UploadForm } from '../types'
 import { api, errorMessage } from '../lib/api'
 import { formatFileSize, todayLocalInput } from '../lib/format'
@@ -11,20 +13,23 @@ type Props = {
   onAdmin: () => void
 }
 
-const STEPS = ['자료 확인', 'Google 파일 업로드', 'Gemini 분석 응답 대기', '초안 검토']
+
 
 export default function UploadScreen({ settings, onAnalyzed, onBack, onAdmin }: Props) {
   const transcribe = providerById(settings.transcribe)
   const summarizer = providerById(settings.summarize)
-  const keysReady =
-    settings.keys.gemini.registered
-  const [form, setForm] = useState<UploadForm>({
+const [form, setForm] = useState<UploadForm>({
     file: null,
     link: '',
     memo: '',
     attendees: '',
     heldAt: todayLocalInput(),
   })
+  const keysReady = settings.keys[settings.summarize].registered && (!form.file || settings.keys[settings.transcribe].registered)
+  const recipients = [...new Set([...(form.file ? [transcribe.name] : []),summarizer.name])].join(' 및 ')
+  const STEPS = ['자료 확인', form.file ? (settings.transcribe==='openai'?'로컬 음성 변환·OpenAI 받아쓰기':'Google 파일 업로드') : '파일 없음 · 메모 사용', summarizer.name+' 요약 응답 대기', '초안 검토']
+  const [chunks,setChunks]=useState({done:0,total:0})
+  const [localStatus,setLocalStatus]=useState('')
   const [error, setError] = useState('')
   const [dragging, setDragging] = useState(false)
   const [phase, setPhase] = useState<'form' | 'analyzing'>('form')
@@ -36,38 +41,49 @@ export default function UploadScreen({ settings, onAnalyzed, onBack, onAdmin }: 
   function pickFile(file: File | null) {
     if (!file) return
     if(file.size>100*1024*1024){setError('파일은 최대 100MB까지 올릴 수 있습니다.');return}
-    setForm((f) => ({ ...f, file }))
+    setForm((f) => ({ ...f, file }));setConsent(false)
     setError('')
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if(busy.current)return
-    if(!settings.keys.gemini.registered){setError('Gemini API 열쇠가 없습니다. 관리자에서 등록해 주세요.');return}
+    if(!keysReady){setError('사용할 제공사의 API 열쇠가 없습니다. 관리자에서 등록해 주세요.');return}
     if(!form.file&&!form.memo.trim()){setError('녹음 파일 또는 메모 중 하나를 입력해 주세요.');return}
     if(!form.heldAt){setError('회의 일시를 넣어 주세요.');return}
-    if(!consent){setError('Google Gemini 외부 처리 동의가 필요합니다.');return}
-    busy.current=true;setError('');setUploaded(0);setStep(0);setPhase('analyzing')
+    if(!consent){setError(recipients+' 외부 처리 동의가 필요합니다.');return}
+    busy.current=true;setError('');setUploaded(0);setChunks({done:0,total:0});setStep(0);setPhase('analyzing')
+    let prepared:PreparedAudio|undefined
     try {
-      let file: unknown
+      const transcriptionProofs:string[]=[]
+      let file:unknown,transcript:Meeting['transcript']|undefined,audioMeta:{name:string;size:number;durationLabel:string}|undefined
       if(form.file){
         setStep(1)
-        const start=await api<{uploadToken:string;chunkSize:number}>('upload-start',{name:form.file.name,size:form.file.size,mimeType:form.file.type||({'mp3':'audio/mpeg','m4a':'audio/mp4','wav':'audio/wav','mp4':'video/mp4','mov':'video/quicktime','webm':'audio/webm','ogg':'audio/ogg','flac':'audio/flac'}[form.file.name.split('.').pop()?.toLowerCase()||'']||'application/octet-stream')})
-        const chunkSize=Math.min(Math.max(1,start.chunkSize||2097152),2097152)
-        for(let offset=0;offset<form.file.size;offset+=chunkSize){
-          const blob=form.file.slice(offset,offset+chunkSize)
-          const data=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(new Error('파일을 읽지 못했습니다. 다시 선택해 주세요.'));reader.readAsDataURL(blob)})
-          const result=await api<{file?:unknown}>('upload-chunk',{uploadToken:start.uploadToken,offset,data,final:offset+blob.size===form.file.size})
-          setUploaded(offset+blob.size)
-          if(result.file)file=result.file
+        if(settings.transcribe==='openai'){
+          setLocalStatus('브라우저에서 음성 길이·메모리를 확인하고 변환 중입니다. 아직 음성을 전송하지 않았습니다.')
+          prepared=await prepareAudio(form.file)
+          setChunks({done:0,total:prepared.count});transcript=[]
+          audioMeta={name:form.file.name,size:form.file.size,durationLabel:Math.floor(prepared.duration/60)+'분 '+Math.round(prepared.duration%60)+'초'}
+          for(let chunkIndex=0;chunkIndex<prepared.count;chunkIndex++){
+            setLocalStatus('OpenAI에 '+(chunkIndex+1)+' / '+prepared.count+' 조각 전송·받아쓰기 중')
+            const wav=prepared.chunk(chunkIndex)
+            const data=await blobBase64(new Blob([wav],{type:'audio/wav'}))
+            const result=await api<{transcript:Meeting['transcript'];proof?:string;processing?:{provider:string;model:string}}>('transcribe-chunk',{data,chunkIndex,offsetSeconds:chunkIndex*60,consent:true})
+            if(!Array.isArray(result.transcript))throw new Error('OpenAI 받아쓰기 응답을 확인하지 못했습니다. 입력 자료는 유지됩니다.')
+            if(result.proof)transcriptionProofs.push(result.proof)
+            if(result.processing)setLocalStatus('실제 받아쓰기: '+result.processing.provider+' / '+result.processing.model)
+            transcript.push(...result.transcript);setChunks({done:chunkIndex+1,total:prepared.count})
+          }
+          prepared.dispose();prepared=undefined
+        }else{
+          file=await uploadGemini(form.file,setUploaded)
         }
-        if(!file)throw new Error('파일 업로드 완료를 확인하지 못했습니다. 다시 시도해 주세요.')
       }
       setStep(2)
-      const result=await api<{meeting:Meeting}>('analyze',{memo:form.memo,attendees:form.attendees,heldAt:form.heldAt,link:form.link,file,consent:true})
+      const result=await api<{meeting:Meeting}>('analyze',{memo:form.memo,attendees:form.attendees,heldAt:form.heldAt,link:form.link,file,transcript,transcriptionProofs,audioMeta,consent:true})
       setStep(3);onAnalyzed(result.meeting)
     } catch(e){setError(errorMessage(e));setPhase('form')}
-    finally {busy.current=false}
+    finally {prepared?.dispose();busy.current=false}
   }
 
   if (phase === 'analyzing') {
@@ -78,13 +94,13 @@ export default function UploadScreen({ settings, onAnalyzed, onBack, onAdmin }: 
           <h1 className="h2">회의 내용을 정리하고 있습니다</h1>
           <p className="muted">{form.file?.name}</p>
           <p className="engine-line">
-            받아쓰기 {transcribe.name} · 요약 {summarizer.name}
+            {form.file ? '받아쓰기 '+transcribe.name+' ('+(settings.transcribeModel||'자동')+') · ' : ''}요약 {summarizer.name} ({settings.summarizeModel||'자동'})
           </p>
 
           <div className="progress">
             <div
               className="progress-bar"
-              style={{ width: step === 1 && form.file ? (uploaded / form.file.size * 100) + '%' : '0%' }}
+              style={{ width: step === 1 && form.file ? (settings.transcribe==='openai' ? (chunks.total ? chunks.done/chunks.total*100 : 0) : uploaded/form.file.size*100) + '%' : '0%' }}
             />
           </div>
 
@@ -100,7 +116,7 @@ export default function UploadScreen({ settings, onAnalyzed, onBack, onAdmin }: 
             ))}
           </ul>
           <p className="note">
-            {step === 1 ? formatFileSize(uploaded) + ' / ' + formatFileSize(form.file?.size ?? 0) + ' 전송됨' : '서버 응답을 기다리고 있습니다. 분석 중 새로고침하지 마세요.'}
+            {step === 1 && settings.transcribe==='openai' ? localStatus+' · 완료 '+chunks.done+' / '+chunks.total : step === 1 ? formatFileSize(uploaded) + ' / ' + formatFileSize(form.file?.size ?? 0) + ' 전송됨' : '서버 응답을 기다리고 있습니다. 분석 중 새로고침하지 마세요.'}
           </p>
         </div>
       </div>
@@ -113,7 +129,7 @@ export default function UploadScreen({ settings, onAnalyzed, onBack, onAdmin }: 
         <p className="eyebrow">자료 등록</p>
         <h1 className="h1">회의 자료를 올려 주세요</h1>
         <p className="muted">
-          녹음·녹화 파일(최대 100MB) 또는 메모로 회의록 초안을 만듭니다.
+          녹음·녹화 파일 또는 메모로 회의록 초안을 만듭니다. Gemini 원본 최대 100MiB. OpenAI는 원본 100MiB·60분 이내라도 브라우저 메모리 예상 256MiB를 넘으면 처리하지 않습니다.
         </p>
       </div>
 
@@ -226,22 +242,22 @@ export default function UploadScreen({ settings, onAnalyzed, onBack, onAdmin }: 
             <dl className="kv">
               <dt>받아쓰기</dt>
               <dd>
-                {transcribe.name} {settings.keys[settings.transcribe].registered ? '· 열쇠 있음' : '· 열쇠 없음'}
+                {form.file ? transcribe.name+' · '+(settings.keys[settings.transcribe].registered?'열쇠 있음':'열쇠 없음')+' · '+(settings.transcribeModel||'자동 모델') : '사용 안 함 (메모만 요약)'}
               </dd>
               <dt>요약</dt>
               <dd>
-                {summarizer.name} {settings.keys[settings.summarize].registered ? '· 열쇠 있음' : '· 열쇠 없음'}
+                {summarizer.name} {settings.keys[settings.summarize].registered ? '· 열쇠 있음' : '· 열쇠 없음'} · {settings.summarizeModel||'자동 모델'}
               </dd>
             </dl>
             {!keysReady && (
               <p className="panel-note warn-inline">
-                Gemini API 열쇠가 없습니다. 관리자 화면에서 등록해야 분석할 수 있습니다.
+                선택한 제공사의 API 열쇠가 없습니다. 메모만 쓰면 요약 열쇠만, 파일이 있으면 받아쓰기와 요약 열쇠가 필요합니다.
               </p>
             )}
           </div>
 
-          <label className="consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> 입력 자료(음성·메모·참석자)를 외부 Google Gemini로 전송·처리하는 데 동의합니다. 개인정보 처리 조건·보관 정책을 확인하기 전 기밀·개인정보를 입력하지 마세요.</label>
-          {!keysReady && <button type="button" className="btn btn-line btn-block" onClick={onAdmin}>관리자에서 Gemini 연결</button>}
+          <label className="consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> 입력 자료(음성·메모·참석자)를 외부 {recipients}로 전송·처리하는 데 동의합니다. {form.file && settings.transcribe!==settings.summarize ? transcribe.name+'에서 받아쓴 원문을 '+summarizer.name+'에도 전송합니다. ' : ''} 개인정보 처리 조건·보관 정책을 확인하기 전 기밀·개인정보를 입력하지 마세요.</label>
+          {!keysReady && <button type="button" className="btn btn-line btn-block" onClick={onAdmin}>관리자에서 AI 연결</button>}
           {error && <p role="alert" className="form-error">{error}</p>}
 
           <button className="btn btn-primary btn-block" type="submit" disabled={!keysReady || !consent}>

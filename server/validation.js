@@ -31,7 +31,7 @@ export function input(body) {
   const memo = text(body.memo, 100000, '회의 메모', true);
   const attendees = typeof body.attendees === 'string' ? body.attendees.split(/[,\n]/).map(x=>x.trim()).filter(Boolean) : (body.attendees || []);
   const result = { memo, attendees: strings(attendees, 100, 100, '참석자'), heldAt: validDate(body.heldAt, '회의 일시'), link: validLink(body.link) };
-  if (!memo && !body.file) fail(400, '회의 메모 또는 녹음 파일을 추가해 주세요. 링크만으로는 분석할 수 없습니다.');
+  if (!memo && !body.file && !(Array.isArray(body.transcript) && body.transcript.length)) fail(400, '회의 메모 또는 녹음 파일을 추가해 주세요. 링크만으로는 분석할 수 없습니다.');
   return result;
 }
 // Firestore stores map/field overhead too, not just JSON bytes. Reserve document
@@ -45,7 +45,7 @@ function firestoreBytes(value) {
 }
 export function meeting(value, { confirmed = true } = {}) {
   const v = object(value, '회의록');
-  exactKeys(v, ['id','title','heldAt','attendees','link','memo','fileName','fileSize','durationLabel','status','summary','decisions','todos','transcript','createdAt']);
+  exactKeys(v, ['id','title','heldAt','attendees','link','memo','fileName','fileSize','durationLabel','status','summary','decisions','todos','transcript','createdAt','processing']);
   const result = {
     id: text(v.id, 80, '회의 ID'), title: text(v.title, 300, '제목'), heldAt: validDate(v.heldAt, '회의 일시'),
     attendees: strings(v.attendees, 100, 100, '참석자'), status: v.status,
@@ -57,6 +57,7 @@ export function meeting(value, { confirmed = true } = {}) {
   if (!Array.isArray(v.todos) || v.todos.length > 200 || !Array.isArray(v.transcript) || v.transcript.length > 3000) fail(400, '실행 항목 또는 발언 기록이 너무 많습니다.');
   result.todos = v.todos.map(t => { object(t); exactKeys(t, ['task','owner','due']); return { task: text(t.task,3000,'실행 항목'), owner:text(t.owner,200,'담당자'), due:text(t.due,200,'기한') }; });
   result.transcript = v.transcript.map(t => { object(t); exactKeys(t,['time','speaker','text']); return { time:text(t.time,50,'발언 시각'), speaker:text(t.speaker,200,'발언자'), text:text(t.text,10000,'발언') }; });
+  if(v.processing!==undefined){const p=object(v.processing,'처리 정보');exactKeys(p,['transcribe','summarize']);const checked=(x,role)=>{object(x,'처리 엔진');exactKeys(x,['provider','model']);if(!['gemini','openai','claude','deepseek'].includes(x.provider)||(role==='transcribe'&&!['gemini','openai'].includes(x.provider)))fail(400,'처리 엔진 정보를 확인해 주세요.');const model=text(x.model,150,'모델');if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$/.test(model))fail(400,'모델 정보를 확인해 주세요.');return {provider:x.provider,model};};result.processing={summarize:checked(p.summarize,'summarize'),...(p.transcribe?{transcribe:checked(p.transcribe,'transcribe')}:{})};}
   if (v.link !== undefined) result.link = validLink(v.link);
   for (const [k,max] of [['memo',100000],['fileName',250],['durationLabel',100]]) if (v[k] !== undefined) result[k] = text(v[k],max,k);
   if (v.fileSize !== undefined) { if (!Number.isSafeInteger(v.fileSize) || v.fileSize < 0 || v.fileSize > MAX_FILE) fail(400,'파일 크기를 확인해 주세요.'); result.fileSize = v.fileSize; }

@@ -16,7 +16,7 @@ export default function TopBar({ onHome, onArchive, onAdmin, onLock, disabled }:
           </span>
           <span className="brand-text">
             <span className="brand-name">회의록 보고서</span>
-            <span className="brand-sub">회의내용을 간결하고 핵심정리를 하는 앱</span>
+            <span className="brand-sub">4종 API 선택 지원 · 운영 v2</span>
           </span>
         </button>
 

@@ -1,3 +1,4 @@
+import type {ProviderId} from './lib/providers'
 export type TodoItem = {
   task: string
   owner: string
@@ -11,6 +12,7 @@ export type TranscriptLine = {
 }
 
 export type Meeting = {
+  processing?: { transcribe?: {provider:ProviderId;model:string}; summarize:{provider:ProviderId;model:string} }
   id: string
   title: string
   heldAt: string
