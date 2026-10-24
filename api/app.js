@@ -1,6 +1,6 @@
 import { AppError, fail, ready, needConfig, session, requireSession, setSession, clearSession, checkOrigin, equal, ipId, object, text } from '../server/security.js';
 import { settings, updateSettings, listMeetings, saveMeeting, deleteMeeting, rateLimit } from '../server/store.js';
-import { uploadStart, uploadChunk, uploadCancel, analyze } from '../server/gemini.js';
+import { uploadStart, uploadChunk, uploadCancel, uploadDiagnostic, analyze } from '../server/gemini.js';
 
 export const maxDuration = 300;
 export const config = { maxDuration: 300 };
@@ -59,6 +59,7 @@ export default async function handler(req,res) {
     else if(action==='meetings' && method==='GET') result=await listMeetings();
     else if(action==='meetings' && method==='POST') result=await saveMeeting(await readBody(req));
     else if(action==='meetings' && method==='DELETE') result=await deleteMeeting(await readBody(req));
+    else if(action==='upload-diagnostic' && method==='POST') { requireSession(req,true); result=await uploadDiagnostic(await readBody(req),s,ipId(req)); }
     else if(action==='analyze' && method==='POST') result=await analyze(await readBody(req),s,ipId(req));
     else if(action==='upload-start' && method==='POST') result=await uploadStart(await readBody(req),s,ipId(req));
     else if(action==='upload-chunk' && method==='POST') result=await uploadChunk(await readBody(req),s);

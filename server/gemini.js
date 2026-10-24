@@ -135,3 +135,34 @@ export async function analyze(body,s,ip) {
     if(file) await deleteFile(file,key).catch(()=>{});
   }
 }
+
+// Admin-only synthetic protocol test. No user audio or inference request.
+export async function uploadDiagnostic(body,s,ip) {
+  if(body.consent!==true) fail(400,'합성 파일 업로드 점검 동의가 필요합니다.');
+  await rateLimit(['upload-diagnostic-'+ip],3,900000,'업로드 점검은 15분에 3회까지 가능합니다.');
+  const key=await geminiKey(), size=9*1024*1024;
+  const bytes=Buffer.alloc(size);bytes.write('RIFF',0);bytes.writeUInt32LE(size-8,4);bytes.write('WAVEfmt ',8);bytes.writeUInt32LE(16,16);bytes.writeUInt16LE(1,20);bytes.writeUInt16LE(1,22);bytes.writeUInt32LE(16000,24);bytes.writeUInt32LE(32000,28);bytes.writeUInt16LE(2,32);bytes.writeUInt16LE(16,34);bytes.write('data',36);bytes.writeUInt32LE(size-44,40);
+  const attempts=[];
+  async function test(chunkSize) {
+    const start=await fetch(API+'/upload/v1beta/files',{method:'POST',redirect:'error',signal:AbortSignal.timeout(20000),headers:{'x-goog-api-key':key,'X-Goog-Upload-Protocol':'resumable','X-Goog-Upload-Command':'start','X-Goog-Upload-Header-Content-Length':String(size),'X-Goog-Upload-Header-Content-Type':'audio/wav','Content-Type':'application/json'},body:JSON.stringify({file:{display_name:'protocol-diagnostic-synthetic.wav'}})});
+    if(!start.ok) return {startStatus:start.status};
+    const url=checkedUploadURL(start.headers.get('x-goog-upload-url'));
+    const granularity=Number(start.headers.get('x-goog-upload-chunk-granularity'))||null;
+    const used=chunkSize||granularity||CHUNK_SIZE;
+    const result={startStatus:start.status,granularity,chunkSize:used,chunkStatuses:[],cleanup:false};
+    try {
+      let payload;
+      for(let offset=0;offset<size;offset+=used){
+        const b=bytes.subarray(offset,Math.min(offset+used,size)),final=offset+b.length===size;
+        const r=await fetch(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(45000),headers:{'Content-Length':String(b.length),'X-Goog-Upload-Offset':String(offset),'X-Goog-Upload-Command':final?'upload, finalize':'upload'},body:b});
+        result.chunkStatuses.push(r.status);
+        if(!r.ok){const raw=await r.text();result.hints={chunkSize:/chunk|granular|multiple/i.test(raw),authentication:/API_KEY_INVALID|api key not valid|UNAUTHENTICATED/i.test(raw),contentType:/mime|content.type/i.test(raw),offset:/offset|received.*bytes/i.test(raw)};const numbers=raw.match(/\b\d{5,10}\b/g)||[];result.expectedByteCounts=[...new Set(numbers.map(Number))].slice(0,4);return result;}
+        if(final) payload=await r.json();
+      }
+      const ident=fileIdentity(payload?.file);await deleteFile(ident,key);result.cleanup=true;result.completed=true;return result;
+    }finally{if(!result.cleanup)await fetch(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(8000),headers:{'X-Goog-Upload-Command':'cancel'}}).catch(()=>{});}
+  }
+  const first=await test(CHUNK_SIZE);attempts.push(first);
+  if(first.granularity && first.granularity!==CHUNK_SIZE && !first.completed) attempts.push(await test(first.granularity));
+  return {synthetic:true,inference:false,attempts};
+}
