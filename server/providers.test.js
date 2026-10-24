@@ -60,3 +60,20 @@ test('workflow consent, WAV bounds, exact transcript and offset validation befor
   await assert.rejects(analyze({consent:false},{sid:'test'},'ip'),e=>e.code==='consent');
   await assert.rejects(analyze({consent:true,memo:'자료',heldAt:'2026-10-24',file:{receipt:'invalid'}},{sid:'test'},'ip'),AppError);
 });
+
+test('proof selection keeps Gemini and memo legacy empty proofs separate from OpenAI audio',async()=>{
+  const {requiresTranscriptionProof,verifyTranscriptionProofs}=await import('./workflow.js');
+  const audioMeta={name:'audio.wav',size:32044,durationLabel:'1초'};
+  // Both file-backed Gemini and memo-only analysis have no supplied transcript.
+  assert.equal(requiresTranscriptionProof(null,null,[]),false);
+  assert.equal(requiresTranscriptionProof(null,null,undefined),false);
+  assert.equal(requiresTranscriptionProof(undefined,undefined,[]),false);
+  // OpenAI audio, including silence, always requires proof, even if missing/empty.
+  assert.equal(requiresTranscriptionProof(audioMeta,[],undefined),true);
+  assert.equal(requiresTranscriptionProof(audioMeta,[],[]),true);
+  assert.equal(requiresTranscriptionProof(audioMeta,[{time:'00:00',speaker:'발언자 미상',text:'발언'}],['proof']),true);
+  assert.throws(()=>verifyTranscriptionProofs([],[],{sid:'test'}),AppError);
+  // Explicit proofs with a supplied transcript may never bypass validation.
+  assert.equal(requiresTranscriptionProof(null,[],[]),true);
+  assert.equal(requiresTranscriptionProof(null,[],undefined),false);
+});

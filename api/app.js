@@ -28,7 +28,7 @@ async function readBody(req) {
 function send(res,status,body) { res.statusCode=status; res.setHeader('Content-Type','application/json; charset=utf-8'); res.end(JSON.stringify(body)); }
 export default async function handler(req,res) {
   res.setHeader('Cache-Control','no-store, max-age=0');
-  res.setHeader('X-App-Version','2026-10-24-multi-v2');
+  res.setHeader('X-App-Version','2026-10-24-multi-v2.1');
   res.setHeader('Pragma','no-cache');
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Referrer-Policy','no-referrer');
@@ -40,7 +40,7 @@ export default async function handler(req,res) {
     if(method!=='GET') checkOrigin(req);
     if(action==='session' && method==='GET') {
       const s=session(req);
-      return send(res,200,{authenticated:Boolean(s),admin:s?.role==='admin',configured:ready(),version:'2026-10-24-multi-v2'});
+      return send(res,200,{authenticated:Boolean(s),admin:s?.role==='admin',configured:ready(),version:'2026-10-24-multi-v2.1'});
     }
     needConfig();
     if(action==='login' && method==='POST') {

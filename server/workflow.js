@@ -21,13 +21,18 @@ export function verifyTranscriptionProofs(proofs,transcript,s) {
   }
   if(offset!==transcript.length)fail(400,'전사 확인 정보와 원문 길이가 일치하지 않습니다.');return {provider:'openai',model};
 }
+// Upload receipts authorize Gemini files independently. Empty legacy proof fields
+// must not turn memo-only or Gemini-file analysis into an OpenAI request.
+export function requiresTranscriptionProof(audioMeta,supplied,proofs) {
+  return Boolean(audioMeta) || (supplied!==null && supplied!==undefined && proofs!==undefined);
+}
 export async function analyze(body,s,ip) {
   object(body);if(body.consent!==true)throw providerError('unknown','consent','consent',400);
   const details=input(body), supplied=body.transcript!==undefined?checkedTranscript(body.transcript):null;
   if(body.file && supplied!==null)fail(400,'파일과 이미 전사된 기록을 동시에 분석할 수 없습니다.');
   const audioMeta=body.audioMeta!==undefined?checkedAudioMeta(body.audioMeta):null;
   if(audioMeta && supplied===null)fail(400,'음성 정보와 함께 전사 기록을 제공해 주세요.');
-  const verifiedProcessing=(audioMeta || (supplied!==null && body.transcriptionProofs!==undefined))?verifyTranscriptionProofs(body.transcriptionProofs,supplied || [],s):undefined;
+  const verifiedProcessing=requiresTranscriptionProof(audioMeta,supplied,body.transcriptionProofs)?verifyTranscriptionProofs(body.transcriptionProofs,supplied || [],s):undefined;
   const file=body.file?validateReceipt(body.file,s):null;const deadline=Date.now()+275000;
   let fileKey;
   try {
